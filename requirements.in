@@ -1,0 +1,7 @@
+pywinauto
+requests
+webdriver-manager
+selenium
+openpyxl
+pandas
+rich

@@ -14,7 +14,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from webdriver_manager.chrome import ChromeDriverManager
 
 from logger import setup_logger
-from src.config import BASE_PATH, BRANCH_MAPPINGS
+from config import BASE_PATH, BRANCH_MAPPINGS
 
 
 def get_app(title: str, backend: str = 'win32'):
@@ -108,7 +108,6 @@ def main():
     for branch, data in all_forms.items():
         print(branch, [form['form']['name'] for form in data['list']])
     pass
-
 
 
 if __name__ == '__main__':

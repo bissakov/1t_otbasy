@@ -17,7 +17,7 @@ from logger import setup_logger
 from config import BASE_PATH, BRANCH_MAPPINGS
 
 
-def get_app(title: str, backend: str = 'win32'):
+def get_app(title: str, backend: str = 'win32') -> Application:
     app = None
     while not app:
         try:
@@ -41,7 +41,7 @@ def sign_auth(branch: str) -> None:
     password_app.top_window().type_keys(f'{password}~~~~~~')
 
 
-def get_forms(driver: webdriver.Chrome):
+def get_forms(driver: webdriver.Chrome) -> dict[str, any]:
     while len(driver.get_cookies()) == 0:
         sleep(.5)
 
@@ -62,7 +62,7 @@ def get_forms(driver: webdriver.Chrome):
     return response.json()
 
 
-def driver_init(driver_path: str | None):
+def driver_init(driver_path: str | None) -> webdriver.Chrome:
     service = Service(executable_path=ChromeDriverManager().install() if not driver_path else driver_path)
     options = webdriver.ChromeOptions()
     options.add_argument('--start-maximized')
@@ -73,7 +73,7 @@ def driver_init(driver_path: str | None):
     return driver
 
 
-def main():
+def main() -> None:
     setup_logger()
 
     # {'17', '02', '14', '05', '08', '06', '13'}

@@ -2,46 +2,44 @@ import logging
 from os import listdir
 from os.path import join
 from time import sleep
+from typing import Any, Dict
 
 import requests
-from pywinauto import Application, ElementNotFoundError
 from selenium import webdriver
-from selenium.common import ElementClickInterceptedException
-from selenium.webdriver.chrome.service import Service
+from selenium.common import ElementClickInterceptedException, TimeoutException
+from selenium.webdriver.chrome.service import Service as ChromeService
 from selenium.webdriver.common.by import By
-from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.support.expected_conditions import element_to_be_clickable, presence_of_element_located
 from selenium.webdriver.support.ui import WebDriverWait
+from tqdm import tqdm
 from webdriver_manager.chrome import ChromeDriverManager
 
-from logger import setup_logger
-from config import BASE_PATH, BRANCH_MAPPINGS
+from src.config import BASE_PATH, BRANCH_MAPPINGS
+from src.logger import logger
+from src.utils import get_app
 
 
-def get_app(title: str, backend: str = 'win32') -> Application:
-    app = None
-    while not app:
-        try:
-            app = Application(backend=backend).connect(title=title)
-        except ElementNotFoundError:
-            sleep(.5)
-            continue
-    return app
+WAIT_TIME = 10
 
 
 def sign_auth(branch: str) -> None:
     password_folder = join(BASE_PATH, branch)
-    logging.info(f'password_folder: {password_folder}')
+    logger.info(f'password_folder: {password_folder}')
+
     password = listdir(password_folder)[0]
-    logging.info(f'password: {password}')
+    logger.info(f'password: {password}')
     auth_key_path = join(password_folder, password, listdir(join(password_folder, password))[0])
 
     choose_auth_app = get_app(title='Открыть файл')
     choose_auth_app.top_window().type_keys(f'{auth_key_path}~', with_spaces=True)
+
     password_app = get_app(title='Формирование ЭЦП в формате CMS')
-    password_app.top_window().type_keys(f'{password}~~~~~~')
+    password_app.top_window().type_keys(f'{password}~')
+    sleep(.5)
+    password_app.top_window().type_keys('~')
 
 
-def get_forms(driver: webdriver.Chrome) -> dict[str, any]:
+def get_forms(driver: webdriver.Chrome) -> Dict[str, Any]:
     while len(driver.get_cookies()) == 0:
         sleep(.5)
 
@@ -50,7 +48,8 @@ def get_forms(driver: webdriver.Chrome) -> dict[str, any]:
 
     url = f'https://cabinet.stat.gov.kz/reports/getNewActiveReport/{bin_number}'
 
-    querystring = {'lang': 'ru', 'state': 'all', 'page': '1', 'start': '0', 'limit': '20'}
+    querystring = {'lang': 'ru', 'state': 'all',
+                   'page': '1', 'start': '0', 'limit': '20'}
 
     headers = {
         'accept': 'application/json',
@@ -63,52 +62,75 @@ def get_forms(driver: webdriver.Chrome) -> dict[str, any]:
 
 
 def driver_init(driver_path: str | None) -> webdriver.Chrome:
-    service = Service(executable_path=ChromeDriverManager().install() if not driver_path else driver_path)
+    service = ChromeService(executable_path=driver_path)
     options = webdriver.ChromeOptions()
     options.add_argument('--start-maximized')
-    driver = webdriver.Chrome(
-        service=service,
-        options=options
-    )
-    return driver
+    return webdriver.Chrome(service=service,options=options)
+
+
+def login(driver: webdriver.Chrome, branch: str) -> None:
+    wait = WebDriverWait(driver, WAIT_TIME)
+    driver.get('https://cabinet.stat.gov.kz/')
+
+    wait.until(element_to_be_clickable((By.CSS_SELECTOR, 'a#idLogin'))).click()
+    agree_container = wait.until(presence_of_element_located((By.CSS_SELECTOR, '#AgreeId')))
+    agree_container.find_element(By.CLASS_NAME, 'x-btn-button').click()
+    wait.until(element_to_be_clickable((By.CSS_SELECTOR, '#lawAlertCheck'))).click()
+    wait.until(element_to_be_clickable((By.CSS_SELECTOR, '#loginButton'))).click()
+
+    sign_auth(branch=branch)
 
 
 def main() -> None:
-    setup_logger()
-
     # {'17', '02', '14', '05', '08', '06', '13'}
 
-    driver_path = None
+    driver_path = ChromeDriverManager().install()
 
-    all_forms = {}
-    for branch, branch_name in BRANCH_MAPPINGS.items():
+    branches = (branch_mapping['branch'] for branch_mapping in BRANCH_MAPPINGS)
+
+    for branch in tqdm(iterable=branches, total=len(BRANCH_MAPPINGS), smoothing=0, desc='Проверка 1-Т'):
         driver = driver_init(driver_path)
-        if not isinstance(driver.service, str):
-            driver_path = driver.service.path
-        wait = WebDriverWait(driver, 10)
+        wait = WebDriverWait(driver, WAIT_TIME)
         with driver:
-            driver.get('https://cabinet.stat.gov.kz/')
-            wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, 'a#idLogin'))).click()
-            agree_container = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, '#AgreeId')))
-            agree_container.find_element(By.CLASS_NAME, 'x-btn-button').click()
-            wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, '#lawAlertCheck'))).click()
-            wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, '#loginButton'))).click()
-
-            sign_auth(branch=branch)
+            login(driver=driver, branch=branch)
 
             try:
-                wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, '#tab-1168-btnInnerEl'))).click()
-                forms = get_forms(driver=driver)
-                all_forms[branch] = forms
+                wait.until(element_to_be_clickable((By.CSS_SELECTOR, '#tab-1168-btnInnerEl'))).click()
             except ElementClickInterceptedException:
-                print(branch)
+                pass
+            except TimeoutException:
+                pass
 
-    print(all_forms)
+            # wait.until(element_to_be_clickable((By.CSS_SELECTOR, 'a#tab-1170'))).click()
+            #
+            # table = wait.until(presence_of_element_located((By.CSS_SELECTOR, '#reportGridId-body')))
 
-    for branch, data in all_forms.items():
-        print(branch, [form['form']['name'] for form in data['list']])
-    pass
+            # rows = driver.find_elements(By.CLASS_NAME, 'x-grid-cell-gridcolumn-1145')
+            # texts = [row.text for row in rows if row.text]
+            # index = texts.index("1-Т (квартальная)") if "1-Т (квартальная)" in texts else -1
+            #
+            # if index == -1:
+            #     raise Exception('1-Т не найдена')
+            #
+            # rows[index].click()
 
+            # wait.until(element_to_be_clickable((By.CSS_SELECTOR, '#ext-gen1978'))).click()
+            #
+            # wait.until(element_to_be_clickable((By.CSS_SELECTOR, '#createReportId-btnIconEl'))).click()
+            #
+            # window_handles = driver.window_handles
+            #
+            # driver.switch_to.window(window_handles[1])
+            # wait.until(element_to_be_clickable((By.CSS_SELECTOR, '#btn-opendata'))).click()
+            #
+            # wait.until(element_to_be_clickable((By.CSS_SELECTOR, 'body > div:nth-child(16) > div.ui-dialog-buttonpane.ui-widget-content.ui-helper-clearfix > div > button:nth-child(1)'))).click()
+            # wait.until(element_to_be_clickable((By.CSS_SELECTOR, 'body > div:nth-child(18) > div.ui-dialog-buttonpane.ui-widget-content.ui-helper-clearfix > div > button:nth-child(1)'))).click()
+
+            form_list = [form['form']['name'] for form in get_forms(driver=driver)['list']]
+            if '1-Т (квартальная)' in form_list:
+                pass
+
+    # Aa1234
 
 if __name__ == '__main__':
     main()
